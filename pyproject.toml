@@ -1,0 +1,12 @@
+[project]
+name = "som_model"
+version = "0.1.0"
+description = "Self Organizing Map model"
+requires-python = ">=3.9"
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
