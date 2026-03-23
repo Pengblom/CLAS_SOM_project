@@ -149,8 +149,15 @@ class GeneralCLASSOM:
             self.kmeans.fit(weights, sample_weight=density)
             labels = self.kmeans.labels_
 
+        # NEURON CLUSTERING
+        elif method == "neurons":
+            self.kmeans.fit(weights)
+            labels = self.kmeans.labels_
+
         else:
-            raise ValueError("method must be 'standard' or 'density'")
+            raise ValueError(
+                "method must be 'standard' or 'density' or 'neurons'"
+            )
 
         self.cluster_method = method
 
@@ -194,3 +201,92 @@ class GeneralCLASSOM:
     def load_model(cls, filepath):
         with open(filepath, "rb") as f:
             return pickle.load(f)
+
+    # SAVE PARAMETERS TO C AND ESP32-S3
+
+    def export_to_c(self, filepath="som_model.h"):
+
+        if not self.is_trained:
+            raise RuntimeError("Model must be trained before export.")
+
+        if self.kmeans is None:
+            raise RuntimeError("Clusters must be created before export.")
+
+        weights = self.som.get_weights()
+        median = self.scaler.center_
+        iqr = self.scaler.scale_
+        clusters = self.kmeans.labels_
+
+        x, y, input_len = weights.shape
+        neurons = x * y
+
+        weights = weights.reshape(neurons, input_len)
+
+        with open(filepath, "w") as f:
+
+            f.write("#pragma once\n\n")
+
+            f.write(f"#define SOM_NEURONS {neurons}\n")
+            f.write(f"#define SOM_INPUT_LEN {input_len}\n\n")
+
+            # -----------------------
+            # SOM WEIGHTS
+            # -----------------------
+
+            f.write("static const float som_weights[] = {\n")
+
+            flat = weights.flatten()
+
+            for i, w in enumerate(flat):
+
+                if i % 6 == 0:
+                    f.write("   ")
+
+                f.write(f"{w:.8f}f,")
+
+                if i % 6 == 5:
+                    f.write("\n")
+
+            f.write("};\n\n")
+
+            # -----------------------
+            # SCALER MEDIAN
+            # -----------------------
+
+            f.write("static const float scaler_median[] = {\n")
+
+            for v in median:
+                f.write(f"   {v:.8f}f,\n")
+
+            f.write("};\n\n")
+
+            # -----------------------
+            # SCALER IQR
+            # -----------------------
+
+            f.write("static const float scaler_iqr[] = {\n")
+
+            for v in iqr:
+                f.write(f"   {v:.8f}f,\n")
+
+            f.write("};\n\n")
+
+            # -----------------------
+            # CLUSTERS
+            # -----------------------
+
+            f.write("static const uint8_t som_clusters[] = {\n")
+
+            for i, c in enumerate(clusters):
+
+                if i % 16 == 0:
+                    f.write("   ")
+
+                f.write(f"{int(c)},")
+
+                if i % 16 == 15:
+                    f.write("\n")
+
+            f.write("\n};\n")
+
+        

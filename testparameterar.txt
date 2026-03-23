@@ -1,0 +1,16 @@
+Test 2
+94640 datapunkter med 6 inputs
+
+Grid: 45x45
+Learningrate: 0.3
+Sigma:12
+Scaler: Robust
+
+Train
+Iterationer: 300000
+QE:2.00
+TE:0.35
+
+Cluster:
+5 st 
+Density 
