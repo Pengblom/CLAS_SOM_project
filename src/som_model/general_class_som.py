@@ -1,6 +1,7 @@
 import numpy as np
 from minisom import MiniSom
 from sklearn.preprocessing import RobustScaler
+from sklearn.preprocessing import MinMaxScaler
 from sklearn.cluster import KMeans
 import pickle
 
@@ -13,6 +14,7 @@ class GeneralCLASSOM:
         y=20,
         input_len=6,
         random_seed=42,
+
         **som_kwargs
     ):
 
@@ -52,10 +54,11 @@ class GeneralCLASSOM:
             **self.som_params
         )
 
-        self.scaler = RobustScaler()
+        self.scaler = MinMaxScaler()
         self.kmeans = None
         self.cluster_method = None
         self.is_trained = False
+        self.cluster_labels = {}
 
     # --------------------------------------------------
     # TRAINING
@@ -180,6 +183,16 @@ class GeneralCLASSOM:
         return self.kmeans.labels_[flat_idx]
 
     # --------------------------------------------------
+    # CLUSTER LABELING
+    # --------------------------------------------------
+
+    def set_cluster_labels(self, label_dict):
+        self.cluster_labels = label_dict
+
+    def get_cluster_name(self, cluster_id):
+        return self.cluster_labels.get(cluster_id, "Unknown")
+
+    # --------------------------------------------------
     # UTILITIES
     # --------------------------------------------------
 
@@ -201,9 +214,7 @@ class GeneralCLASSOM:
     def load_model(cls, filepath):
         with open(filepath, "rb") as f:
             return pickle.load(f)
-
-    # SAVE PARAMETERS TO C AND ESP32-S3
-
+            
     def export_to_c(self, filepath="som_model.h"):
 
         if not self.is_trained:
@@ -213,68 +224,64 @@ class GeneralCLASSOM:
             raise RuntimeError("Clusters must be created before export.")
 
         weights = self.som.get_weights()
-        median = self.scaler.center_
-        iqr = self.scaler.scale_
-        clusters = self.kmeans.labels_
+        min_vals = self.scaler.data_min_
+        range_vals = self.scaler.data_range_
+        range_vals = np.where(range_vals == 0, 1e-6, range_vals)
 
         x, y, input_len = weights.shape
         neurons = x * y
 
-        weights = weights.reshape(neurons, input_len)
+        weights_2d = weights.reshape(neurons, input_len)
+
+        # cluster per neuron (inte per sample)
+        clusters = self.kmeans.predict(weights_2d)
 
         with open(filepath, "w") as f:
 
             f.write("#pragma once\n\n")
 
             f.write(f"#define SOM_NEURONS {neurons}\n")
-            f.write(f"#define SOM_INPUT_LEN {input_len}\n\n")
+            f.write(f"#define SOM_INPUT_LEN {input_len}\n")
+            f.write(f"#define SOM_WIDTH {x}\n")
+            f.write(f"#define SOM_HEIGHT {y}\n\n")
 
             # -----------------------
             # SOM WEIGHTS
             # -----------------------
-
             f.write("static const float som_weights[] = {\n")
 
-            flat = weights.flatten()
+            flat = weights_2d.flatten()
 
             for i, w in enumerate(flat):
-
                 if i % 6 == 0:
                     f.write("   ")
-
                 f.write(f"{w:.8f}f,")
-
                 if i % 6 == 5:
                     f.write("\n")
 
             f.write("};\n\n")
 
             # -----------------------
-            # SCALER MEDIAN
+            # SCALER MIN
             # -----------------------
-
-            f.write("static const float scaler_median[] = {\n")
-
-            for v in median:
+            f.write("static const float scaler_min[] = {\n")
+            for v in min_vals:
                 f.write(f"   {v:.8f}f,\n")
 
             f.write("};\n\n")
 
             # -----------------------
-            # SCALER IQR
+            # SCALER RANGE
             # -----------------------
-
-            f.write("static const float scaler_iqr[] = {\n")
-
-            for v in iqr:
+            f.write("static const float scaler_range[] = {\n")
+            for v in range_vals:
                 f.write(f"   {v:.8f}f,\n")
 
             f.write("};\n\n")
 
             # -----------------------
-            # CLUSTERS
+            # CLUSTERS (per neuron)
             # -----------------------
-
             f.write("static const uint8_t som_clusters[] = {\n")
 
             for i, c in enumerate(clusters):
@@ -288,5 +295,20 @@ class GeneralCLASSOM:
                     f.write("\n")
 
             f.write("\n};\n")
+            # -----------------------
+            # CLUSTER NAMES
+            # -----------------------
+            if hasattr(self, "cluster_labels") and self.cluster_labels:
 
+                f.write("\n// Cluster names\n")
+                f.write("static const char* cluster_names[] = {\n")
+
+            # säkerställ rätt ordning (0,1,2,...)
+                for i in range(len(self.cluster_labels)):
+                    name = self.cluster_labels[i]
+                    f.write(f'   "{name}",\n')
+
+                f.write("};\n")
+
+        print(f"C header exported to: {filepath}")
         
