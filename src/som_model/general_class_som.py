@@ -169,18 +169,56 @@ class GeneralCLASSOM:
     # --------------------------------------------------
     # PREDICTION
     # --------------------------------------------------
-
     def predict_cluster(self, data):
 
         if self.kmeans is None:
             raise RuntimeError("Run create_clusters() first.")
 
+        print("🔍 INPUT (first 5 rows):")
+        print(data[:5])
+
+        print("🔍 INPUT range:")
+        print("min:", data.min())
+        print("max:", data.max())
+
         scaled_data = self.scaler.transform(data)
+
+        print("\n🔍 AFTER scaling (first 5 rows):")
+        print(scaled_data[:5])
+
+        print("🔍 AFTER scaling range:")
+        print("min:", scaled_data.min())
+        print("max:", scaled_data.max())
+
+        winners = np.array([self.som.winner(d) for d in scaled_data])
+
+        print("\n🔍 Unique BMUs:", len(set(map(tuple, winners))))
+
+        width = self.som._weights.shape[1]
+        flat_idx = winners[:, 0] * width + winners[:, 1]
+
+        clusters = self.kmeans.labels_[flat_idx]
+
+        print("🔍 Unique clusters:", set(clusters))
+
+        return clusters
+
+
+
+    """
+    def predict_cluster(self, data):
+
+        if self.kmeans is None:
+            raise RuntimeError("Run create_clusters() first.")
+        
+        
+        scaled_data = self.scaler.transform(data)
+        
 
         winners = np.array([self.som.winner(d) for d in scaled_data])
         flat_idx = winners[:, 0] * self.y + winners[:, 1]
 
-        return self.kmeans.labels_[flat_idx]
+        return self.kmeans.labels_[flat_idx] """
 
     # --------------------------------------------------
     # CLUSTER LABELING
