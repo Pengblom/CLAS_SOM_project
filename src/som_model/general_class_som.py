@@ -101,6 +101,13 @@ class GeneralCLASSOM:
             raise ValueError("mode must be: batch | random | standard")
 
         self.is_trained = True
+        self.qe = self.som.quantization_error(scaled_data)
+        self.te = self.som.topographic_error(scaled_data)
+
+        if verbose:
+            print(f"Quantization Error: {self.qe:.4f}")
+            print(f"Topographic Error: {self.te:.4f}")
+            
         print(f"Training completed ({iterations} iterations)")
 
     # --------------------------------------------------
@@ -229,6 +236,30 @@ class GeneralCLASSOM:
 
     def get_cluster_name(self, cluster_id):
         return self.cluster_labels.get(cluster_id, "Unknown")
+    
+    # --------------------------------------------------
+    # UTILITIES / DEBUG
+    # --------------------------------------------------
+
+    def inspect_bmu_distribution(self, data, use_pca=True):
+
+        scaled_data = self.scaler.fit_transform(data)
+
+        # använd samma init som i train()
+        if use_pca:
+            self.som.pca_weights_init(scaled_data)
+        else:
+            self.som.random_weights_init(scaled_data)
+
+        winners = np.array([self.som.winner(d) for d in scaled_data])
+
+        unique_bmus = set(map(tuple, winners))
+
+        print("🔍 Total samples:", len(data))
+        print("🔍 Unique BMUs:", len(unique_bmus))
+        print("🔍 Map size:", self.x * self.y)
+
+        return winners
 
     # --------------------------------------------------
     # UTILITIES
@@ -239,6 +270,26 @@ class GeneralCLASSOM:
 
     def get_summary(self):
         return self.params
+
+    
+    def quantization_error(self, data):
+
+        if not self.is_trained:
+            raise RuntimeError("Train model first.")
+
+        scaled_data = self.scaler.transform(data)
+
+        return self.som.quantization_error(scaled_data)
+
+
+    def topographic_error(self, data):
+
+        if not self.is_trained:
+            raise RuntimeError("Train model first.")
+
+        scaled_data = self.scaler.transform(data)
+
+        return self.som.topographic_error(scaled_data)
 
     # --------------------------------------------------
     # SAVE / LOAD
