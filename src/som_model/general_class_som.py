@@ -1,9 +1,12 @@
 import numpy as np
-from minisom import MiniSom
-from sklearn.preprocessing import RobustScaler
+from minisom import MiniSom 
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.cluster import KMeans
 import pickle
+
+# optional scalers (not used in current version, but could be added as options)
+# from sklearn.preprocessing import RobustScaler
+# from sklearn.preprocessing import StandardScaler 
 
 
 class GeneralCLASSOM:
@@ -75,6 +78,7 @@ class GeneralCLASSOM:
     ):
 
         scaled_data = self.scaler.fit_transform(data)
+        self.feature_names = list(data.columns)
 
         # weight initialization
         if use_pca:
@@ -110,10 +114,8 @@ class GeneralCLASSOM:
             
         print(f"Training completed ({iterations} iterations)")
 
-    # --------------------------------------------------
-    # CLUSTERING
-    # --------------------------------------------------
-
+   
+    # CLUSTERING   
     def create_clusters(
         self,
         data=None,
@@ -132,16 +134,14 @@ class GeneralCLASSOM:
             n_init=10
         )
 
-        # -------------------------
-        # STANDARD CLUSTERING
-        # -------------------------
+       
+        # STANDARD CLUSTERING       
         if method == "standard":
 
             labels = self.kmeans.fit_predict(weights)
 
-        # -------------------------
-        # DENSITY-AWARE CLUSTERING
-        # -------------------------
+       
+        # DENSITY-AWARE CLUSTERING        
         elif method == "density":
 
             if data is None:
@@ -161,7 +161,7 @@ class GeneralCLASSOM:
 
         # NEURON CLUSTERING
         elif method == "neurons":
-            self.kmeans.fit(weights)
+            self.kmeans.fit(weights) 
             labels = self.kmeans.labels_
 
         else:
@@ -173,9 +173,8 @@ class GeneralCLASSOM:
 
         return labels.reshape(self.x, self.y)
 
-    # --------------------------------------------------
-    # PREDICTION
-    # --------------------------------------------------
+    
+    # PREDICTION    
     def predict_cluster(self, data):
 
         if self.kmeans is None:
@@ -209,38 +208,15 @@ class GeneralCLASSOM:
         print("🔍 Unique clusters:", set(clusters))
 
         return clusters
-
-
-
-    """
-    def predict_cluster(self, data):
-
-        if self.kmeans is None:
-            raise RuntimeError("Run create_clusters() first.")
-        
-        
-        scaled_data = self.scaler.transform(data)
-        
-
-        winners = np.array([self.som.winner(d) for d in scaled_data])
-        flat_idx = winners[:, 0] * self.y + winners[:, 1]
-
-        return self.kmeans.labels_[flat_idx] """
-
-    # --------------------------------------------------
-    # CLUSTER LABELING
-    # --------------------------------------------------
-
+    
+    # CLUSTER LABELING    
     def set_cluster_labels(self, label_dict):
         self.cluster_labels = label_dict
 
     def get_cluster_name(self, cluster_id):
         return self.cluster_labels.get(cluster_id, "Unknown")
-    
-    # --------------------------------------------------
+       
     # UTILITIES / DEBUG
-    # --------------------------------------------------
-
     def inspect_bmu_distribution(self, data, use_pca=True):
 
         scaled_data = self.scaler.fit_transform(data)
@@ -255,23 +231,21 @@ class GeneralCLASSOM:
 
         unique_bmus = set(map(tuple, winners))
 
-        print("🔍 Total samples:", len(data))
-        print("🔍 Unique BMUs:", len(unique_bmus))
-        print("🔍 Map size:", self.x * self.y)
+        print("Total samples:", len(data))
+        print("Unique BMUs:", len(unique_bmus))
+        print("Map size:", self.x * self.y)
 
         return winners
 
-    # --------------------------------------------------
-    # UTILITIES
-    # --------------------------------------------------
-
+  
+    # UTILITIES - u-matrix, errors, summary
+    
     def get_u_matrix(self):
         return self.som.distance_map()
 
     def get_summary(self):
         return self.params
-
-    
+        
     def quantization_error(self, data):
 
         if not self.is_trained:
@@ -291,19 +265,40 @@ class GeneralCLASSOM:
 
         return self.som.topographic_error(scaled_data)
 
-    # --------------------------------------------------
+    
     # SAVE / LOAD
-    # --------------------------------------------------
-
+    
     def save_model(self, filepath):
+        data = {
+            "weights": self.som.get_weights(),
+            "scaler": self.scaler,
+            "kmeans": self.kmeans,
+            "params": self.params,
+            "feature_names": self.feature_names
+        }
+
         with open(filepath, "wb") as f:
-            pickle.dump(self, f)
+            pickle.dump(data, f)
 
     @classmethod
     def load_model(cls, filepath):
         with open(filepath, "rb") as f:
-            return pickle.load(f)
-            
+            data = pickle.load(f)
+
+        obj = cls(
+            x=data["params"]["x"],
+            y=data["params"]["y"],
+            input_len=data["params"]["input_len"]
+        )
+
+        obj.som._weights = data["weights"]
+        obj.scaler = data["scaler"]
+        obj.kmeans = data["kmeans"]
+        obj.feature_names = data["feature_names"]
+        obj.is_trained = True
+
+        return obj
+    
     def export_to_c(self, filepath="som_model.h"):
 
         if not self.is_trained:
@@ -313,17 +308,35 @@ class GeneralCLASSOM:
             raise RuntimeError("Clusters must be created before export.")
 
         weights = self.som.get_weights()
+
+        """
+        # standard scaler
+        mean_vals = self.scaler.mean_
+        std_vals = self.scaler.scale_
+
+        std_vals = np.where(std_vals == 0, 1e-6, std_vals)
+        """
+
+        # minmaxscaler info
+        
         min_vals = self.scaler.data_min_
         range_vals = self.scaler.data_range_
         range_vals = np.where(range_vals == 0, 1e-6, range_vals)
+        
 
         x, y, input_len = weights.shape
         neurons = x * y
 
         weights_2d = weights.reshape(neurons, input_len)
 
-        # cluster per neuron (inte per sample)
+        # cluster per neuron
         clusters = self.kmeans.predict(weights_2d)
+
+        """
+        # clusters if StandardScaler 
+        scaled_weights = (weights_2d - mean_vals) / std_vals
+        clusters = self.kmeans.predict(scaled_weights)
+        """
 
         with open(filepath, "w") as f:
 
@@ -334,9 +347,13 @@ class GeneralCLASSOM:
             f.write(f"#define SOM_WIDTH {x}\n")
             f.write(f"#define SOM_HEIGHT {y}\n\n")
 
-            # -----------------------
+            f.write("// Feature order:\n")
+            for name in self.feature_names:
+                f.write(f"// {name}\n")
+
+            
             # SOM WEIGHTS
-            # -----------------------
+            
             f.write("static const float som_weights[] = {\n")
 
             flat = weights_2d.flatten()
@@ -350,27 +367,40 @@ class GeneralCLASSOM:
 
             f.write("};\n\n")
 
-            # -----------------------
+            # write with standard scaler 
+            """
+            f.write("static const float scaler_mean[] = {\n")
+            for v in mean_vals:
+                f.write(f"   {v:.8f}f,\n")
+
+            f.write("};\n\n")
+
+                       
+            f.write("static const float scaler_std[] = {\n")
+            for v in std_vals:
+                f.write(f"   {v:.8f}f,\n")
+
+            f.write("};\n\n")
+            """
+            
             # SCALER MIN
-            # -----------------------
+            
             f.write("static const float scaler_min[] = {\n")
             for v in min_vals:
                 f.write(f"   {v:.8f}f,\n")
 
             f.write("};\n\n")
-
-            # -----------------------
             # SCALER RANGE
-            # -----------------------
+            
             f.write("static const float scaler_range[] = {\n")
             for v in range_vals:
                 f.write(f"   {v:.8f}f,\n")
 
-            f.write("};\n\n")
+            f.write("};\n\n")        
 
-            # -----------------------
+            
             # CLUSTERS (per neuron)
-            # -----------------------
+            
             f.write("static const uint8_t som_clusters[] = {\n")
 
             for i, c in enumerate(clusters):
@@ -384,15 +414,15 @@ class GeneralCLASSOM:
                     f.write("\n")
 
             f.write("\n};\n")
-            # -----------------------
+            
             # CLUSTER NAMES
-            # -----------------------
+            
             if hasattr(self, "cluster_labels") and self.cluster_labels:
 
                 f.write("\n// Cluster names\n")
                 f.write("static const char* cluster_names[] = {\n")
 
-            # säkerställ rätt ordning (0,1,2,...)
+            # correct order of cluster names based on cluster IDs
                 for i in range(len(self.cluster_labels)):
                     name = self.cluster_labels[i]
                     f.write(f'   "{name}",\n')
